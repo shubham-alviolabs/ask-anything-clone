@@ -3,7 +3,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { Search, Send, Loader2 } from 'lucide-react';
+import { Send, Loader2 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Message {
   id: string;
@@ -13,6 +15,7 @@ interface Message {
 }
 
 export const SearchInterface = () => {
+  const { user } = useAuth();
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -26,6 +29,20 @@ export const SearchInterface = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, streamingContent]);
+
+  const trackUsage = async (action: string, metadata?: any) => {
+    if (!user) return;
+    
+    try {
+      await supabase.from('usage_analytics').insert({
+        user_id: user.id,
+        action,
+        metadata,
+      });
+    } catch (error) {
+      console.error('Error tracking usage:', error);
+    }
+  };
 
   const handleSearch = async () => {
     if (!query.trim() || isLoading) return;
@@ -41,6 +58,9 @@ export const SearchInterface = () => {
     setQuery('');
     setIsLoading(true);
     setStreamingContent('');
+
+    // Track search usage
+    await trackUsage('search', { query: userMessage.content });
 
     try {
       // Handle streaming response directly
@@ -91,6 +111,12 @@ export const SearchInterface = () => {
       setMessages(prev => [...prev, assistantMessage]);
       setStreamingContent('');
       
+      // Track response completion
+      await trackUsage('response_completed', { 
+        query: userMessage.content,
+        response_length: assistantContent.length 
+      });
+      
     } catch (error) {
       console.error('Search error:', error);
       setMessages(prev => [...prev, {
@@ -99,6 +125,11 @@ export const SearchInterface = () => {
         content: 'Sorry, I encountered an error while searching. Please try again.',
         timestamp: new Date(),
       }]);
+      
+      await trackUsage('search_error', { 
+        query: userMessage.content,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
     } finally {
       setIsLoading(false);
     }
@@ -112,27 +143,10 @@ export const SearchInterface = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex flex-col">
-      {/* Header */}
-      <div className="border-b border-white/10 bg-black/20 backdrop-blur-xl">
-        <div className="container flex h-16 items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <img 
-              src="/lovable-uploads/59308f36-8f34-4d65-9847-07f6d15dc8eb.png" 
-              alt="Alvio" 
-              className="h-8 w-8"
-            />
-            <h1 className="text-xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-              Alvio Search
-            </h1>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4">
-        {messages.length === 0 ? (
-          // Welcome Screen
+    <div className="flex-1 flex flex-col">
+      {messages.length === 0 ? (
+        // Welcome Screen
+        <div className="flex-1 flex items-center justify-center p-4">
           <div className="max-w-4xl w-full text-center space-y-8">
             <div className="space-y-4">
               <img 
@@ -174,82 +188,82 @@ export const SearchInterface = () => {
               </div>
             </div>
           </div>
-        ) : (
-          // Chat Interface
-          <div className="w-full max-w-4xl flex flex-col h-full">
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto space-y-6 p-4">
-              {messages.map((message) => (
-                <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <Card className={`max-w-[80%] p-6 backdrop-blur-xl border-white/20 ${
-                    message.type === 'user' 
-                      ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-white' 
-                      : 'bg-white/10 text-gray-100'
-                  } rounded-2xl`}>
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</div>
-                    <div className="text-xs opacity-60 mt-3">
-                      {message.timestamp.toLocaleTimeString()}
-                    </div>
-                  </Card>
-                </div>
-              ))}
-
-              {/* Streaming message */}
-              {isLoading && streamingContent && (
-                <div className="flex justify-start">
-                  <Card className="max-w-[80%] p-6 bg-white/10 backdrop-blur-xl border-white/20 text-gray-100 rounded-2xl">
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed">{streamingContent}</div>
-                    <div className="flex items-center mt-3">
-                      <Loader2 className="h-3 w-3 animate-spin mr-2 text-purple-400" />
-                      <span className="text-xs opacity-60">Generating response...</span>
-                    </div>
-                  </Card>
-                </div>
-              )}
-
-              {/* Loading indicator */}
-              {isLoading && !streamingContent && (
-                <div className="flex justify-start">
-                  <Card className="max-w-[80%] p-6 bg-white/10 backdrop-blur-xl border-white/20 text-gray-100 rounded-2xl">
-                    <div className="flex items-center space-x-3">
-                      <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
-                      <span className="text-sm">Searching the web...</span>
-                    </div>
-                  </Card>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Fixed Input at Bottom */}
-            <div className="p-4 border-t border-white/10 bg-black/20 backdrop-blur-xl">
-              <div className="max-w-4xl mx-auto relative">
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Ask a follow-up question..."
-                  className="w-full h-12 pl-6 pr-14 bg-white/10 border-white/20 backdrop-blur-xl rounded-xl text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/20"
-                  disabled={isLoading}
-                />
-                <Button 
-                  onClick={handleSearch} 
-                  disabled={isLoading || !query.trim()}
-                  size="icon"
-                  className="absolute right-2 top-2 h-8 w-8 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 border-0"
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
+        </div>
+      ) : (
+        // Chat Interface
+        <div className="flex-1 flex flex-col">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto space-y-6 p-4">
+            {messages.map((message) => (
+              <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <Card className={`max-w-[80%] p-6 backdrop-blur-xl border-white/20 ${
+                  message.type === 'user' 
+                    ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-white' 
+                    : 'bg-white/10 text-gray-100'
+                } rounded-2xl`}>
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</div>
+                  <div className="text-xs opacity-60 mt-3">
+                    {message.timestamp.toLocaleTimeString()}
+                  </div>
+                </Card>
               </div>
+            ))}
+
+            {/* Streaming message */}
+            {isLoading && streamingContent && (
+              <div className="flex justify-start">
+                <Card className="max-w-[80%] p-6 bg-white/10 backdrop-blur-xl border-white/20 text-gray-100 rounded-2xl">
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed">{streamingContent}</div>
+                  <div className="flex items-center mt-3">
+                    <Loader2 className="h-3 w-3 animate-spin mr-2 text-purple-400" />
+                    <span className="text-xs opacity-60">Generating response...</span>
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* Loading indicator */}
+            {isLoading && !streamingContent && (
+              <div className="flex justify-start">
+                <Card className="max-w-[80%] p-6 bg-white/10 backdrop-blur-xl border-white/20 text-gray-100 rounded-2xl">
+                  <div className="flex items-center space-x-3">
+                    <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+                    <span className="text-sm">Searching the web...</span>
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Fixed Input at Bottom */}
+          <div className="p-4 border-t border-white/10 bg-black/20 backdrop-blur-xl">
+            <div className="max-w-4xl mx-auto relative">
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Ask a follow-up question..."
+                className="w-full h-12 pl-6 pr-14 bg-white/10 border-white/20 backdrop-blur-xl rounded-xl text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/20"
+                disabled={isLoading}
+              />
+              <Button 
+                onClick={handleSearch} 
+                disabled={isLoading || !query.trim()}
+                size="icon"
+                className="absolute right-2 top-2 h-8 w-8 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 border-0"
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };
