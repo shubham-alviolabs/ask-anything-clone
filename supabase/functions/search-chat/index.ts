@@ -23,34 +23,74 @@ async function searchWeb(query: string): Promise<SearchResult[]> {
     const response = await fetch(searchUrl);
     const data = await response.json();
     
-    return data.results?.slice(0, 8) || [];
+    return data.results?.slice(0, 10) || [];
   } catch (error) {
     console.error('Search error:', error);
     return [];
   }
 }
 
-async function generateResponse(query: string, searchResults: SearchResult[]): Promise<ReadableStream> {
+async function generateRelatedQuestions(query: string, content: string): Promise<string[]> {
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://alvio.app',
+        'X-Title': 'Alvio Search',
+      },
+      body: JSON.stringify({
+        model: 'qwen/qwen-2.5-72b-instruct',
+        messages: [
+          {
+            role: 'system',
+            content: 'Generate 4 related follow-up questions based on the user\'s original query and the content provided. Return only the questions, one per line, without numbering or bullet points.'
+          },
+          {
+            role: 'user',
+            content: `Original query: ${query}\n\nContent: ${content.slice(0, 1000)}`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 200,
+      }),
+    });
+
+    const data = await response.json();
+    const questions = data.choices?.[0]?.message?.content?.trim()
+      .split('\n')
+      .filter((q: string) => q.trim())
+      .slice(0, 4) || [];
+    
+    return questions;
+  } catch (error) {
+    console.error('Error generating related questions:', error);
+    return [];
+  }
+}
+
+async function generateStreamingResponse(query: string, searchResults: SearchResult[]): Promise<ReadableStream> {
   const context = searchResults.map((result, index) => 
     `[${index + 1}] ${result.title}\n${result.content}\nURL: ${result.url}`
   ).join('\n\n');
 
-  const prompt = `You are Alvio Search, an AI search assistant that provides comprehensive answers with proper citations, similar to Perplexity AI.
+  const prompt = `You are Alvio Search, an AI search assistant that provides comprehensive, accurate answers with proper citations.
 
-IMPORTANT FORMATTING INSTRUCTIONS:
-- Provide a well-structured, comprehensive answer
-- Use numbered citations [1], [2], etc. to reference sources throughout your response
-- Include a "Sources" section at the end with clickable links
-- Be informative but concise
-- Use clear headings and bullet points when appropriate
+CRITICAL INSTRUCTIONS:
+- Provide a detailed, well-structured answer using the search results
+- Use numbered citations [1], [2], etc. throughout your response to reference sources
+- Structure your answer with clear sections and headings when appropriate
+- Be comprehensive but concise
 - Maintain a professional, helpful tone
+- Focus on accuracy and cite specific sources for claims
 
 Search Results:
 ${context}
 
 User Question: ${query}
 
-Provide a comprehensive answer with proper citations and a sources section at the end.`;
+Provide a comprehensive answer with proper citations:`;
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -64,8 +104,8 @@ Provide a comprehensive answer with proper citations and a sources section at th
       model: 'qwen/qwen-2.5-72b-instruct',
       messages: [{ role: 'user', content: prompt }],
       stream: true,
-      temperature: 0.7,
-      max_tokens: 2048,
+      temperature: 0.3,
+      max_tokens: 2000,
     }),
   });
 
@@ -74,10 +114,26 @@ Provide a comprehensive answer with proper citations and a sources section at th
       const reader = response.body?.getReader();
       if (!reader) return;
 
+      let fullContent = '';
+
       try {
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            // Generate related questions after the main response is complete
+            try {
+              const relatedQuestions = await generateRelatedQuestions(query, fullContent);
+              controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ 
+                type: 'related_questions', 
+                questions: relatedQuestions 
+              })}\n\n`));
+            } catch (e) {
+              console.error('Error generating related questions:', e);
+            }
+            
+            controller.close();
+            return;
+          }
 
           const chunk = new TextDecoder().decode(value);
           const lines = chunk.split('\n');
@@ -85,16 +141,17 @@ Provide a comprehensive answer with proper citations and a sources section at th
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
-              if (data === '[DONE]') {
-                controller.close();
-                return;
-              }
+              if (data === '[DONE]') continue;
               
               try {
                 const parsed = JSON.parse(data);
                 const content = parsed.choices?.[0]?.delta?.content || '';
                 if (content) {
-                  controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ content })}\n\n`));
+                  fullContent += content;
+                  controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ 
+                    type: 'content', 
+                    content 
+                  })}\n\n`));
                 }
               } catch (e) {
                 // Skip invalid JSON
@@ -131,8 +188,16 @@ serve(async (req) => {
     const searchResults = await searchWeb(query);
     console.log(`Found ${searchResults.length} search results`);
 
-    // Generate streaming response
-    const stream = await generateResponse(query, searchResults);
+    // Send sources first
+    const sourcesResponse = new Response(JSON.stringify({ 
+      type: 'sources', 
+      sources: searchResults 
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+
+    // Then start streaming response
+    const stream = await generateStreamingResponse(query, searchResults);
 
     return new Response(stream, {
       headers: {
