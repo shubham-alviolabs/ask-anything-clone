@@ -44,18 +44,12 @@ export const SearchInterface = () => {
     setStreamingContent('');
 
     try {
-      const { data, error } = await supabase.functions.invoke('search-chat', {
-        body: { query: userMessage.content },
-      });
-
-      if (error) throw error;
-
-      // Handle streaming response
+      // Handle streaming response directly
       const response = await fetch(`https://kjuziamuiiypucmwvrcd.supabase.co/functions/v1/search-chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabase.supabaseKey}`,
+          'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtqdXppYW11aWl5cHVjbXd2cmNkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDczMjMzMTEsImV4cCI6MjA2Mjg5OTMxMX0.wPjjGF0-dwzZUUa7boyzMZClFGw2fJ0Xw75YcSjJTZk`,
         },
         body: JSON.stringify({ query: userMessage.content }),
       });
