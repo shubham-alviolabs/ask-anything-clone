@@ -7,7 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY');
+const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
 const SEARXNG_URL = 'https://searx.alviolabs.com';
 
 interface SearchResult {
@@ -35,23 +35,33 @@ async function generateResponse(query: string, searchResults: SearchResult[]): P
     `[${index + 1}] ${result.title}\n${result.content}\nURL: ${result.url}`
   ).join('\n\n');
 
-  const prompt = `You are Alvio Search, an AI search assistant. Answer the user's question based on the search results provided. Use citations [1], [2], etc. to reference the sources.
+  const prompt = `You are Alvio Search, an AI search assistant that provides comprehensive answers with proper citations, similar to Perplexity AI.
+
+IMPORTANT FORMATTING INSTRUCTIONS:
+- Provide a well-structured, comprehensive answer
+- Use numbered citations [1], [2], etc. to reference sources throughout your response
+- Include a "Sources" section at the end with clickable links
+- Be informative but concise
+- Use clear headings and bullet points when appropriate
+- Maintain a professional, helpful tone
 
 Search Results:
 ${context}
 
 User Question: ${query}
 
-Provide a comprehensive, well-structured answer with proper citations. Be concise but informative.`;
+Provide a comprehensive answer with proper citations and a sources section at the end.`;
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
       'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://alvio.app',
+      'X-Title': 'Alvio Search',
     },
     body: JSON.stringify({
-      model: 'llama-3.1-70b-versatile',
+      model: 'qwen/qwen-2.5-72b-instruct',
       messages: [{ role: 'user', content: prompt }],
       stream: true,
       temperature: 0.7,

@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, ExternalLink } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -13,6 +13,26 @@ interface Message {
   content: string;
   timestamp: Date;
 }
+
+const formatMessage = (content: string) => {
+  // Convert markdown-style formatting to HTML
+  let formatted = content
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/### (.*?)\n/g, '<h3 class="text-lg font-semibold mt-4 mb-2 text-purple-200">$1</h3>')
+    .replace(/## (.*?)\n/g, '<h2 class="text-xl font-semibold mt-4 mb-2 text-purple-100">$1</h2>')
+    .replace(/# (.*?)\n/g, '<h1 class="text-2xl font-bold mt-4 mb-2 text-white">$1</h1>')
+    .replace(/\n\n/g, '</p><p class="mb-3">')
+    .replace(/\n/g, '<br/>')
+    .replace(/\[(\d+)\]/g, '<sup class="text-purple-300 font-medium">[$1]</sup>');
+
+  // Wrap in paragraphs
+  if (!formatted.includes('<p>')) {
+    formatted = `<p class="mb-3">${formatted}</p>`;
+  }
+
+  return formatted;
+};
 
 export const SearchInterface = () => {
   const { user } = useAuth();
@@ -63,7 +83,6 @@ export const SearchInterface = () => {
     await trackUsage('search', { query: userMessage.content });
 
     try {
-      // Handle streaming response directly
       const response = await fetch(`https://kjuziamuiiypucmwvrcd.supabase.co/functions/v1/search-chat`, {
         method: 'POST',
         headers: {
@@ -111,7 +130,6 @@ export const SearchInterface = () => {
       setMessages(prev => [...prev, assistantMessage]);
       setStreamingContent('');
       
-      // Track response completion
       await trackUsage('response_completed', { 
         query: userMessage.content,
         response_length: assistantContent.length 
@@ -196,12 +214,19 @@ export const SearchInterface = () => {
           <div className="flex-1 overflow-y-auto space-y-6 p-4">
             {messages.map((message) => (
               <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <Card className={`max-w-[80%] p-6 backdrop-blur-xl border-white/20 ${
+                <Card className={`max-w-[85%] p-6 backdrop-blur-xl border-white/20 ${
                   message.type === 'user' 
                     ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-white' 
                     : 'bg-white/10 text-gray-100'
                 } rounded-2xl`}>
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</div>
+                  {message.type === 'assistant' ? (
+                    <div 
+                      className="prose prose-invert max-w-none"
+                      dangerouslySetInnerHTML={{ __html: formatMessage(message.content) }}
+                    />
+                  ) : (
+                    <div className="text-sm leading-relaxed">{message.content}</div>
+                  )}
                   <div className="text-xs opacity-60 mt-3">
                     {message.timestamp.toLocaleTimeString()}
                   </div>
@@ -212,8 +237,11 @@ export const SearchInterface = () => {
             {/* Streaming message */}
             {isLoading && streamingContent && (
               <div className="flex justify-start">
-                <Card className="max-w-[80%] p-6 bg-white/10 backdrop-blur-xl border-white/20 text-gray-100 rounded-2xl">
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed">{streamingContent}</div>
+                <Card className="max-w-[85%] p-6 bg-white/10 backdrop-blur-xl border-white/20 text-gray-100 rounded-2xl">
+                  <div 
+                    className="prose prose-invert max-w-none"
+                    dangerouslySetInnerHTML={{ __html: formatMessage(streamingContent) }}
+                  />
                   <div className="flex items-center mt-3">
                     <Loader2 className="h-3 w-3 animate-spin mr-2 text-purple-400" />
                     <span className="text-xs opacity-60">Generating response...</span>
@@ -225,7 +253,7 @@ export const SearchInterface = () => {
             {/* Loading indicator */}
             {isLoading && !streamingContent && (
               <div className="flex justify-start">
-                <Card className="max-w-[80%] p-6 bg-white/10 backdrop-blur-xl border-white/20 text-gray-100 rounded-2xl">
+                <Card className="max-w-[85%] p-6 bg-white/10 backdrop-blur-xl border-white/20 text-gray-100 rounded-2xl">
                   <div className="flex items-center space-x-3">
                     <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
                     <span className="text-sm">Searching the web...</span>
